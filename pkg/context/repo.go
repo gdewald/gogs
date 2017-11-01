@@ -17,6 +17,7 @@ import (
 	"github.com/gogits/gogs/models"
 	"github.com/gogits/gogs/models/errors"
 	"github.com/gogits/gogs/pkg/setting"
+	clog "gopkg.in/clog.v1"
 )
 
 type PullRequest struct {
@@ -352,10 +353,30 @@ func RepoRef() macaron.Handler {
 				}
 				c.Repo.CommitID = c.Repo.Commit.ID.String()
 			} else if len(refName) == 40 {
+				clog.Info("Searching commit %v", refName)
+
 				c.Repo.IsViewCommit = true
 				c.Repo.CommitID = refName
 
 				c.Repo.Commit, err = c.Repo.GitRepo.GetCommit(refName)
+
+				// Search for object ref as well.
+				if err != nil && c.Repo.GitRepo.IsObjectExist(refName) {
+					clog.Info("Object by refName %v exists", refName)
+					var trees []*git.Tree
+					trees, err = c.Repo.GitRepo.SearchTrees(refName, c.Repo.TreePath)
+
+					if err == nil && len(trees) > 0 {
+
+						refName = trees[0].ID.String()
+						clog.Info("Object commit %s", refName)
+
+						c.Repo.Commit, err = c.Repo.GitRepo.GetCommit(refName)
+					} else {
+						clog.Info("Object with refName %v at path %s does not exist", refName, c.Repo.TreePath, err)
+					}
+				}
+
 				if err != nil {
 					c.NotFound()
 					return
