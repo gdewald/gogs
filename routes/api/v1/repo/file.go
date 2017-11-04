@@ -24,16 +24,24 @@ func GetRawFile(c *context.APIContext) {
 		return
 	}
 
-	blob, err := c.Repo.Commit.GetBlobByPath(c.Repo.TreePath)
-	if err != nil {
-		if git.IsErrNotExist(err) {
-			c.Status(404)
-		} else {
-			c.Error(500, "GetBlobByPath", err)
+	var blob *git.Blob
+	if c.Repo.IsViewBlob {
+		blob = c.Repo.Blob
+	} else {
+		var err error
+		blob, err = c.Repo.Commit.GetBlobByPath(c.Repo.TreePath)
+
+		if err != nil {
+			if git.IsErrNotExist(err) {
+				c.Status(404)
+			} else {
+				c.Error(500, "GetBlobByPath", err)
+			}
+			return
 		}
-		return
 	}
-	if err = repo.ServeBlob(c.Context, blob); err != nil {
+
+	if err := repo.ServeBlob(c.Context, blob); err != nil {
 		c.Error(500, "ServeBlob", err)
 	}
 }

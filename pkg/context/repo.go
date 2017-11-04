@@ -17,7 +17,6 @@ import (
 	"github.com/gogits/gogs/models"
 	"github.com/gogits/gogs/models/errors"
 	"github.com/gogits/gogs/pkg/setting"
-	clog "gopkg.in/clog.v1"
 )
 
 type PullRequest struct {
@@ -33,11 +32,13 @@ type Repository struct {
 	IsViewBranch bool
 	IsViewTag    bool
 	IsViewCommit bool
+	IsViewBlob   bool
 	Repository   *models.Repository
 	Owner        *models.User
 	Commit       *git.Commit
 	Tag          *git.Tag
 	GitRepo      *git.Repository
+	Blob         *git.Blob
 	BranchName   string
 	TagName      string
 	TreePath     string
@@ -353,34 +354,34 @@ func RepoRef() macaron.Handler {
 				}
 				c.Repo.CommitID = c.Repo.Commit.ID.String()
 			} else if len(refName) == 40 {
-				clog.Info("Searching commit %v", refName)
+				if commit, err1 := c.Repo.GitRepo.GetCommit(refName); err1 == nil {
 
-				c.Repo.IsViewCommit = true
-				c.Repo.CommitID = refName
+					c.Repo.IsViewCommit = true
+					c.Repo.CommitID = refName
+					c.Repo.Commit = commit
 
-				c.Repo.Commit, err = c.Repo.GitRepo.GetCommit(refName)
-
-				// Search for object ref as well.
-				if err != nil && c.Repo.GitRepo.IsObjectExist(refName) {
-					clog.Info("Object by refName %v exists", refName)
-					var trees []*git.Tree
-					trees, err = c.Repo.GitRepo.SearchTrees(refName, c.Repo.TreePath)
-
-					if err == nil && len(trees) > 0 {
-
-						refName = trees[0].ID.String()
-						clog.Info("Object commit %s", refName)
-
-						c.Repo.Commit, err = c.Repo.GitRepo.GetCommit(refName)
-					} else {
-						clog.Info("Object with refName %v at path %s does not exist", refName, c.Repo.TreePath, err)
+					if err1 != nil {
+						c.NotFound()
+						return
 					}
-				}
+				} else if c.Repo.GitRepo.IsObjectExist(refName) {
 
-				if err != nil {
+					c.Repo.IsViewBlob = true
+					c.Repo.Blob, err = c.Repo.GitRepo.GetBlobInPath(refName, c.Repo.TreePath)
+
+					if err != nil {
+						if git.IsErrNotExist(err) {
+							c.NotFound()
+						} else {
+							c.Handle(500, "GetIdBlobByPath", err)
+						}
+						return
+					}
+				} else {
 					c.NotFound()
 					return
 				}
+
 			} else {
 				c.Handle(404, "RepoRef invalid repo", fmt.Errorf("branch or tag not exist: %s", refName))
 				return
@@ -391,9 +392,11 @@ func RepoRef() macaron.Handler {
 		c.Data["BranchName"] = c.Repo.BranchName
 		c.Data["CommitID"] = c.Repo.CommitID
 		c.Data["TreePath"] = c.Repo.TreePath
+		c.Data["Blob"] = c.Repo.Blob
 		c.Data["IsViewBranch"] = c.Repo.IsViewBranch
 		c.Data["IsViewTag"] = c.Repo.IsViewTag
 		c.Data["IsViewCommit"] = c.Repo.IsViewCommit
+		c.Data["IsViewBlob"] = c.Repo.IsViewBlob
 
 		// People who have push access or have fored repository can propose a new pull request.
 		if c.Repo.IsWriter() || (c.IsLogged && c.User.HasForkedRepo(c.Repo.Repository.ID)) {
